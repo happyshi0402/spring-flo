@@ -1,15 +1,16 @@
 import { Component, Input, Output, ElementRef, EventEmitter, OnInit, OnDestroy, ViewEncapsulation } from '@angular/core';
 import 'rxjs/add/operator/debounceTime';
 import { dia } from 'jointjs';
-import { Flo } from './../shared/flo.common';
+import { Flo } from '../shared/flo-common';
 import { Shapes, Constants } from '../shared/shapes';
-import { Utils } from './editor.utils';
+import { Utils } from './editor-utils';
 import { CompositeDisposable, Disposable } from 'ts-disposables';
 import * as _$ from 'jquery';
 import * as _ from 'lodash';
-import * as _joint from 'jointjs';
+import { Observable } from 'rxjs/Observable';
 import { Subject } from 'rxjs/Subject';
-const joint : any = _joint;
+import { BehaviorSubject } from 'rxjs/BehaviorSubject';
+const joint : any = Flo.joint;
 const $ : any = _$;
 
 
@@ -77,6 +78,9 @@ export class EditorComponent implements OnInit, OnDestroy {
   @Output()
   validationMarkers = new EventEmitter<Map<string, Array<Flo.Marker>>>();
 
+  @Output()
+  contentValidated = new EventEmitter<boolean>();
+
   /**
    * Joint JS Graph object representing the Graph model
    */
@@ -130,9 +134,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   @Output()
   private dslChange = new EventEmitter<string>();
 
-  private textToGraphConversionCompleted = new EventEmitter<void>();
+  private textToGraphConversionCompleted = new Subject<void>();
 
-  private graphToTextConversionCompleted = new EventEmitter<void>();
+  private graphToTextConversionCompleted = new Subject<void>();
+
+  private paletteReady = new BehaviorSubject<boolean>(false);
 
   constructor(private element: ElementRef) {
     let self = this;
@@ -256,12 +262,16 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
       }
 
-      get textToGraphConversionSubject(): Subject<void> {
+      get textToGraphConversionObservable(): Observable<void> {
         return self.textToGraphConversionCompleted;
       }
 
-      get graphToTextConversionSubject(): Subject<void> {
+      get graphToTextConversionObservable(): Observable<void> {
         return self.graphToTextConversionCompleted;
+      }
+
+      get paletteReady(): Observable<boolean> {
+        return self.paletteReady;
       }
 
     })();
@@ -315,7 +325,14 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   set graphToTextSync(sync : boolean) {
     this._graphToTextSyncEnabled = sync;
-    this.graphToTextEventEmitter.emit();
+    // Try commenting the sync out. Just set the flag but don't kick off graph->text conversion
+    // this.performGraphToTextSyncing();
+  }
+
+  private performGraphToTextSyncing() {
+    if (this._graphToTextSyncEnabled) {
+      this.graphToTextEventEmitter.emit();
+    }
   }
 
   createHandle(element: dia.CellView, kind: string, action: () => void, location: dia.Point): dia.Element {
@@ -758,6 +775,7 @@ export class EditorComponent implements OnInit, OnDestroy {
             this.graph.getCells()
               .forEach((cell: dia.Cell) => this.markElement(cell, allMarkers.has(cell.id) ? allMarkers.get(cell.id) : []));
             this.validationMarkers.emit(allMarkers);
+            this.contentValidated.emit(true);
             resolve();
           });
       } else {
@@ -825,11 +843,11 @@ export class EditorComponent implements OnInit, OnDestroy {
     console.debug(`Updating graph to represent '${this._dslText}'`);
     if (this.metamodel && this.metamodel.textToGraph) {
       return this.metamodel.textToGraph(this.editorContext, this._dslText).then(() => {
-        this.textToGraphConversionCompleted.emit();
+        this.textToGraphConversionCompleted.next();
         return this.validateContent()
       });
     } else {
-      this.textToGraphConversionCompleted.emit();
+      this.textToGraphConversionCompleted.next();
       return this.validateContent();
     }
   }
@@ -841,11 +859,11 @@ export class EditorComponent implements OnInit, OnDestroy {
           this._dslText = text;
           this.dslChange.emit(text);
         }
-        this.graphToTextConversionCompleted.emit();
+        this.graphToTextConversionCompleted.next();
         return this.validateContent();
       });
     } else {
-      this.graphToTextConversionCompleted.emit();
+      this.graphToTextConversionCompleted.next();
       return this.validateContent();
     }
   }
@@ -861,11 +879,19 @@ export class EditorComponent implements OnInit, OnDestroy {
       });
       this._disposables.add(Disposable.create(() => textSyncSubscription.unsubscribe()));
 
+      // Setup content validated event emitter. Emit not validated when graph to text conversion required
+      let graphValidatedSubscription1 = this.graphToTextEventEmitter.subscribe(() => this.contentValidated.emit(false));
+      this._disposables.add(Disposable.create(() => graphValidatedSubscription1.unsubscribe));
+
       // let validationSubscription = this.validationEventEmitter.debounceTime(100).subscribe(() => this.validateGraph());
       // this._disposables.add(Disposable.create(() => validationSubscription.unsubscribe()));
 
       let graphSyncSubscription = this.textToGraphEventEmitter.debounceTime(300).subscribe(() => this.updateGraphRepresentation());
       this._disposables.add(Disposable.create(() => graphSyncSubscription.unsubscribe()));
+
+      // Setup content validated event emitter. Emit not validated when text to graph conversion required
+      let graphValidatedSubscription2 = this.textToGraphEventEmitter.subscribe(() => this.contentValidated.emit(false));
+      this._disposables.add(Disposable.create(() => graphValidatedSubscription2.unsubscribe));
 
       if (this.editor && this.editor.setDefaultContent) {
         this.editor.setDefaultContent(this.editorContext, data);
@@ -890,7 +916,7 @@ export class EditorComponent implements OnInit, OnDestroy {
           if (propAttr.indexOf('metadata') === 0 ||
             propAttr.indexOf('props') === 0 ||
             (this.renderer && this.renderer.isSemanticProperty && this.renderer.isSemanticProperty(propAttr, node))) {
-            this.graphToTextEventEmitter.emit();
+            this.performGraphToTextSyncing();
           }
           if (this.renderer && this.renderer.refreshVisuals) {
             this.renderer.refreshVisuals(node, propAttr, this.paper);
@@ -919,7 +945,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       let newSourceId = link.get('source').id;
       let oldSourceId = link.previous('source').id;
       if (newSourceId !== oldSourceId) {
-        this.graphToTextEventEmitter.emit();
+        this.performGraphToTextSyncing();
       }
       this.handleLinkEvent('change:source', link);
     });
@@ -929,7 +955,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       let newTargetId = link.get('target').id;
       let oldTargetId = link.previous('target').id;
       if (newTargetId !== oldTargetId) {
-        this.graphToTextEventEmitter.emit();
+        this.performGraphToTextSyncing();
       }
       this.handleLinkEvent('change:target', link);
     });
@@ -945,7 +971,7 @@ export class EditorComponent implements OnInit, OnDestroy {
           (this.renderer && this.renderer.isSemanticProperty && this.renderer.isSemanticProperty(propAttr, link))) {
           let sourceId = link.get('source').id;
           let targetId = link.get('target').id;
-          this.graphToTextEventEmitter.emit();
+          this.performGraphToTextSyncing();
         }
         if (this.renderer && this.renderer.refreshVisuals) {
           this.renderer.refreshVisuals(link, propAttr, this.paper);
@@ -968,7 +994,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         this.handleNodeCreation(<dia.Element> element);
       }
       if (element.get('type') === joint.shapes.flo.NODE_TYPE || element.get('type') === joint.shapes.flo.LINK_TYPE) {
-        this.graphToTextEventEmitter.emit();
+        this.performGraphToTextSyncing();
       }
       this.autosizePaper();
     });
@@ -981,9 +1007,9 @@ export class EditorComponent implements OnInit, OnDestroy {
         this.selection = undefined;
       }
       if (element.isLink()) {
-        window.setTimeout(() => this.graphToTextEventEmitter.emit(), 100);
+        window.setTimeout(() => this.performGraphToTextSyncing(), 100);
       } else if (element.get('type') === joint.shapes.flo.NODE_TYPE) {
-        this.graphToTextEventEmitter.emit();
+        this.performGraphToTextSyncing();
       }
       this.autosizePaper();
     });
@@ -1119,6 +1145,10 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     // The paper is what will represent the graph on the screen
     this.paper = new joint.dia.Paper(options);
+  }
+
+  updatePaletteReadyState(ready: boolean) {
+    this.paletteReady.next(ready);
   }
 
 }

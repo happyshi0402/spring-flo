@@ -18,12 +18,16 @@ const metamodelData: Array<RawMetadata> = [{
     {id: 'password', name: 'password', description: 'Password to login to service', type: 'password'},
     {id: 'messages', name: 'messages', description: 'List of messages', type: 'list'},
     {id: 'counts', name: 'counts', description: 'List of counts', type: 'list[number]'},
+    {id: 'language', name: 'language', description: 'Code snippet language', type: 'enum', options: ['javascript', 'ruby', 'java'], defaultValue: 'javascript'},
+    {id: 'snippet', name: 'snippet', description: 'Code snippet', type: 'code', defaultValue: ''},
     {id: 'successes', name: 'successes', description: 'List of successes', type: 'list[boolean]'},
   ],
 }, {
   name: 'filewatch', group: 'source', description: 'Produce messages from the content of files created in a directory',
   properties: [
-    {id: 'dir', name: 'dir', description: 'the absolute path to monitor for files'}
+    {id: 'dir', name: 'dir', description: 'the absolute path to monitor for files'},
+    {id: 'withSubDir', name: 'withSubDir', description: 'With subdirectories', defaultValue: true, type: 'boolean'},
+    {id: 'type', name: 'type', description: 'Type of file watching', type: 'enum', options: ['tough', 'so-so', 'easy']}
   ],
 }, {
   name: 'transform', group: 'processor', description: 'Apply an expression to modify incoming messages',
@@ -133,7 +137,7 @@ export class Metamodel implements Flo.Metamodel {
     })
   }
 
-  graphToText(flo: Flo.EditorContext) {
+  graphToText(flo: Flo.EditorContext): Promise<string> {
     console.log('Graph -> Text');
     return new Promise((resolve) => resolve(convertGraphToText(flo.getGraph())));
   }

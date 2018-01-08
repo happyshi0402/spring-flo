@@ -1,13 +1,12 @@
 import {Component, ElementRef, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, Inject, ViewEncapsulation} from '@angular/core';
-import { BehaviorSubject } from 'rxjs/BehaviorSubject';
+import { Subject } from 'rxjs/Subject';
 import 'rxjs/add/operator/debounceTime';
 import { dia } from 'jointjs';
-import { Flo } from './../shared/flo.common';
+import { Flo } from '../shared/flo-common';
 import { Shapes, Constants } from './../shared/shapes';
 import { DOCUMENT } from '@angular/platform-browser'
 import * as _$ from 'jquery';
-import * as _joint from 'jointjs';
-const joint : any = _joint;
+const joint : any = Flo.joint;
 const $ : any = _$;
 
 const DEBOUNCE_TIME : number = 300;
@@ -44,23 +43,6 @@ joint.shapes.flo.PaletteGroupHeader = joint.shapes.basic.Generic.extend({
 })
 export class Palette implements OnInit, OnDestroy, OnChanges {
 
-  private static MetamodelListener = class {
-
-    constructor(private palette : Palette) {}
-
-    metadataError(data : any) : void {
-      console.error(JSON.stringify(data));
-    }
-
-    metadataAboutToChange() : void {
-
-    }
-
-    metadataChanged(data : Flo.MetadataChangedData) : void {
-      this.palette.buildPalette(data.newData);
-    }
-  };
-
   @Input()
   metamodel : Flo.Metamodel;
 
@@ -73,12 +55,20 @@ export class Palette implements OnInit, OnDestroy, OnChanges {
   @Input()
   set paletteSize(size : number) {
     console.log('Palette Size : ' + size);
-    this._paletteSize = size;
-    this.rebuildPalette();
+    if (this._paletteSize != size) {
+      this._paletteSize = size;
+      this.rebuildPalette();
+    }
   }
 
   @Output()
   onPaletteEntryDrop = new EventEmitter<Flo.DnDEvent>();
+
+  @Output()
+  paletteReady = new EventEmitter<boolean>();
+
+  @Output()
+  paletteFocus = new EventEmitter<void>();
 
   private _paletteSize : number;
 
@@ -88,12 +78,16 @@ export class Palette implements OnInit, OnDestroy, OnChanges {
 
   private palette : dia.Paper;
 
-  private filterTextModel = new BehaviorSubject(this.filterText);
+  private filterTextModel = new Subject<string>();
 
   private mouseMoveHanlder = (e : any) => this.handleDrag(e);
   private mouseUpHanlder = (e : any) => this.handleMouseUp(e);
 
-  private _metamodelListener : Flo.MetamodelListener;
+  private _metamodelListener : Flo.MetamodelListener = {
+    metadataError: (data) => {},
+    metadataAboutToChange: () => {},
+    metadataChanged: () => this.rebuildPalette()
+  };
 
   /**
    * The names of any groups in the palette that have been deliberately closed (the arrow clicked on)
@@ -108,18 +102,18 @@ export class Palette implements OnInit, OnDestroy, OnChanges {
 
   private viewBeingDragged : dia.CellView;
 
+  private initialized = false;
+
   constructor(private element: ElementRef, @Inject(DOCUMENT) private document : any) {
     this.paletteGraph = new joint.dia.Graph();
     this.paletteGraph.set('type', Constants.PALETTE_CONTEXT);
     this._filterText = '';
 
     this.closedGroups = new Set<string>();
+  }
 
-    this._metamodelListener = new Palette.MetamodelListener(this);
-
-    this.filterTextModel
-      .debounceTime(DEBOUNCE_TIME)
-      .subscribe((value) => this.rebuildPalette());
+  onFocus(): void {
+    this.paletteFocus.emit();
   }
 
   ngOnInit() {
@@ -170,9 +164,18 @@ export class Palette implements OnInit, OnDestroy, OnChanges {
     if (this.metamodel) {
       this.metamodel.load().then(data => {
         this.buildPalette(data);
+
+        // Add listener to metamodel
         if (this.metamodel && this.metamodel.subscribe) {
           this.metamodel.subscribe(this._metamodelListener);
         }
+
+        // Add debounced listener to filter text changes
+        this.filterTextModel
+          .debounceTime(DEBOUNCE_TIME)
+          .subscribe((value) => this.rebuildPalette());
+
+        this.initialized = true;
       });
     } else {
       console.error('No Metamodel service specified for palette!');
@@ -218,6 +221,7 @@ export class Palette implements OnInit, OnDestroy, OnChanges {
   private buildPalette(metamodel : Map<string, Map<string, Flo.ElementMetadata>>) {
     let startTime : number = new Date().getTime();
 
+    this.paletteReady.emit(false);
     this.paletteGraph.clear();
 
     let filterText = this.filterText;
@@ -332,18 +336,21 @@ export class Palette implements OnInit, OnDestroy, OnChanges {
       prevNode = pnode;
     });
     this.palette.setDimensions(parentWidth, ypos);
+    this.paletteReady.emit(true);
     console.info('buildPalette took '+(new Date().getTime()-startTime)+'ms');
   }
 
   rebuildPalette() {
-    if (this.metamodel) {
+    if (this.initialized && this.metamodel) {
       this.metamodel.load().then(metamodel => this.buildPalette(metamodel));
     }
   }
 
   set filterText(text : string) {
-    this._filterText = text;
-    this.filterTextModel.next(text);
+    if (this._filterText !== text) {
+      this._filterText = text;
+      this.filterTextModel.next(text);
+    }
   }
 
   get filterText() : string {

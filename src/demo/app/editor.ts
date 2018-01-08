@@ -19,8 +19,7 @@ import { Validators } from '@angular/forms';
 import { dia } from 'jointjs';
 import { BsModalService } from 'ngx-bootstrap';
 import { PropertiesDialogComponent } from './properties.dialog.component';
-import * as _joint from 'jointjs';
-const joint : any = _joint;
+const joint : any = Flo.joint;
 
 /**
  * @author Alex Boyko
@@ -561,8 +560,7 @@ class SamplePropertiesGroupModel extends Properties.PropertiesGroupModel {
         inputType = Properties.InputType.PASSWORD;
         break;
       case 'boolean':
-        inputType = Properties.InputType.CHECKBOX;
-        break;
+        return new Properties.CheckBoxControlModel(property);
       case 'number':
         inputType = Properties.InputType.EMAIL;
         break;
@@ -579,6 +577,8 @@ class SamplePropertiesGroupModel extends Properties.PropertiesGroupModel {
             }
           }));
         }
+      case 'code':
+        return new Properties.CodeControlModelWithDynamicLanguageProperty(property, 'language', this, this.encodeTextToDSL, this.decodeTextFromDSL);
       default:
         if (property.metadata.name === 'name') {
           validation = {
@@ -592,4 +592,17 @@ class SamplePropertiesGroupModel extends Properties.PropertiesGroupModel {
     }
     return new Properties.GenericControlModel(property, inputType, validation);
   }
+
+  encodeTextToDSL(text: string): string {
+    return '\"' + text.replace(/(?:\r\n|\r|\n)/g, '\\n').replace(/"/g, '""') + '\"';
+  }
+
+  decodeTextFromDSL(dsl: string): string {
+    if (dsl.charAt(0) === '\"' && dsl.charAt(dsl.length - 1) === '\"') {
+      dsl = dsl.substr(1, dsl.length - 2);
+    }
+    return dsl.replace(/\\n/g, '\n').replace(/\"\"/g, '"');
+  }
+
 }
+

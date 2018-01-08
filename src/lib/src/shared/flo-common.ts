@@ -1,6 +1,10 @@
 import { dia } from 'jointjs';
-import { Subject } from 'rxjs/Subject';
+import { Observable } from 'rxjs/Observable';
+import * as _joint from 'jointjs';
+
 export namespace Flo {
+
+  export const joint : any = _joint;
 
   export enum DnDEventType {
     DRAG,
@@ -26,6 +30,7 @@ export namespace Flo {
     readonly titleProperty? : string;
     readonly noEditableProps? : boolean;
     readonly noPaletteEntry? : boolean;
+    readonly unselectable? : boolean;
     readonly [propName : string] : any;
 
     readonly allowAdditionalProperties? : boolean; //TODO: Verify it is still needed
@@ -49,19 +54,7 @@ export namespace Flo {
   export interface MetamodelListener {
     metadataError(data : any) : void;
     metadataAboutToChange() : void;
-    metadataChanged(data : MetadataChangedData) : void;
-  }
-
-  export interface MetadataChangedData {
-    readonly old : Map<string, Map<string, ElementMetadata>>;
-    readonly new : Map<string, Map<string, ElementMetadata>>;
-    readonly [propName : string] : any;
-  }
-
-  export interface Definition {
-    text : string;
-    name? : string; //TODO: is this still required?
-    [propName : string] : any; //TODO: is anything else needed?
+    metadataChanged() : void;
   }
 
   export interface Metamodel {
@@ -73,8 +66,6 @@ export namespace Flo {
     refresh?() : Promise<Map<string, Map<string, ElementMetadata>>>;
     subscribe?(listener : MetamodelListener) : void;
     unsubscribe?(listener : MetamodelListener) : void;
-    encodeTextToDSL?(text : string) : string;
-    decodeTextFromDSL?(dsl : string) : string;
     isValidPropertyValue?(element : dia.Element, property : string, value : any) : boolean;
   }
 
@@ -145,8 +136,9 @@ export namespace Flo {
     createNode(metadata : ElementMetadata, props? : Map<string, any>, position? : dia.Point) : dia.Element;
     createLink(source : LinkEnd, target : LinkEnd, metadata? : ElementMetadata, props? : Map<string, any>) : dia.Link;
     deleteSelectedNode() : void;
-    readonly textToGraphConversionSubject: Subject<void>;
-    readonly graphToTextConversionSubject: Subject<void>;
+    readonly textToGraphConversionObservable: Observable<void>;
+    readonly graphToTextConversionObservable: Observable<void>;
+    readonly paletteReady: Observable<boolean>;
     [propName : string] : any;
   }
 
